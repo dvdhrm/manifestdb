@@ -1,0 +1,24 @@
+name: "Repository Test"
+
+on: [pull_request, push]
+
+jobs:
+  unittest:
+    name: "Unittest"
+    runs-on: ubuntu-latest
+    container: osbuilders/ghci-osbuild:v1
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+        - "src.test.test_pylint"
+    steps:
+    - name: "Clone Repository"
+      uses: actions/checkout@v2
+    - name: "Run Unittest"
+      run: |
+        python3 -m unittest discover \
+          -k "${{ matrix.test }}" \
+          -s "src/test" \
+          -t . \
+          -v

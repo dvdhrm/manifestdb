@@ -6,12 +6,14 @@ jobs:
   mverify:
     name: "Manifest Check"
     runs-on: ubuntu-latest
-    container: osbuilders/ghci-osbuild:v1
     steps:
     - name: "Clone Repository"
       uses: actions/checkout@v2
     - name: "Run Check"
-      run: |
-        make mpp-verify
-        make mtype-verify
-        make mformat-verify
+      uses: osbuild/containers/src/actions/ghci-osbuild@v1
+      with:
+        image: docker.pkg.github.com/osbuild/containers/ghci-manifestdb:v1
+        run: |
+          make mpp-verify
+          make mtype-verify
+          make mformat-verify

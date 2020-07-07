@@ -138,7 +138,10 @@ class MdbPreprocess:
                     hashproc.update(block)
                     ctx["stream"].write(block)
 
-                hash_file = "sha256:" + hashproc.hexdigest()
+                if proc.returncode != 0:
+                    raise RuntimeError("MPP failed")
+
+                hash_file = "sha256-" + hashproc.hexdigest()
                 hash_path = os.path.join(hash_dir, hash_file)
                 ctx["name"] = hash_file
 

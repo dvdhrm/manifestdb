@@ -235,13 +235,13 @@ msrc-list:
 			--header "Authorization: Bearer $(MSRC_TOKEN)" \
 			--silent \
 			"https://$(MSRC_REGISTRY)/v2/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)/tags/list" \
-		| $(BIN_JQ) \
+		| $(BIN_JQ) -c \
 			'.["tags"] - ["docker-base-layer"]'
 
 .PHONY: msrc-list-diff
 msrc-list-diff:
 	echo "$$($(MAKE_SILENT) mlist)" "$$($(MAKE_SILENT) msrc-list)" \
-		| $(BIN_JQ) -s '.[0] - .[1]'
+		| $(BIN_JQ) -cs '.[0] - .[1]'
 
 .PHONY: msrc-pull
 msrc-pull:
@@ -265,5 +265,5 @@ mlist:
 	$(BIN_LS) \
 			-1b \
 			"$(SRCDIR)/manifests/by-checksum" \
-		| $(BIN_JQ) -R . \
-		| $(BIN_JQ) -s .
+		| $(BIN_JQ) -cR . \
+		| $(BIN_JQ) -cs .

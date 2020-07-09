@@ -213,6 +213,8 @@ class MdbPreprocess:
         hash_file = None
         hash_dir = os.path.join(self._mdb.args.dstdir, "by-checksum")
 
+        print(f"Preprocessing: {path}")
+
         # As first step we open the source file and stream it into a temporary
         # file in the `by-checksum` directory. We compute the checksum on the
         # fly and eventually link the file under its own checksum as name.

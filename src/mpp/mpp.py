@@ -103,7 +103,7 @@ class Manifest:
         """Write the manifest to a stream"""
 
         try:
-            json.dump(self._strip(), stream, indent=2)
+            json.dump(self._strip(), stream, indent=2, sort_keys=True)
             print(end="\n", file=stream)
         except TypeError:
             print("Cannot JSON-encode manifest", file=sys.stderr)
@@ -283,7 +283,8 @@ class MppDepsolve:
                     "path": tsi.pkg.relativepath,
                 }
                 deps.append(pkg)
-        return deps
+
+        return sorted(deps, key=lambda dep: dep["checksum"])
 
 
 class MppPipelineBase:

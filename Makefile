@@ -11,8 +11,6 @@ BIN_FIND ?= find
 BIN_OSBUILD ?= osbuild
 BIN_PYTHON3 ?= python3
 
-BUILDDIR_ABS := $(abspath $(BUILDDIR))
-SRCDIR_ABS := $(abspath $(SRCDIR))
 FN_BUILDDIR = $(patsubst ./%,%,$(BUILDDIR)/$(1))
 FN_SRCDIR = $(patsubst ./%,%,$(SRCDIR)/$(1))
 
@@ -73,7 +71,7 @@ FORCE:
 .PHONY: mpp-generate
 mpp-generate:
 	( \
-		cd "$(SRCDIR)" ; \
+		set -e ; \
 		./mdb.sh \
 			preprocess \
 			--dstdir "./manifests" \
@@ -83,15 +81,17 @@ mpp-generate:
 
 .PHONY: mpp-verify
 mpp-verify: mpp-generate
-	@FOUND=$$( \
-		cd "$(SRCDIR)" ; \
-		git status --porcelain -- ./manifests ; \
-	) ; \
-	if [[ ! -z $${FOUND} ]]; then \
-		echo "Manifests not up-to-date:" ; \
-		echo "$${FOUND}" ; \
-		exit 1 ; \
-	fi
+	( \
+		set -e ; \
+		FOUND=$$( \
+			$(BIN_GIT) status --porcelain -- ./manifests ; \
+		) ; \
+		if [[ ! -z $${FOUND} ]]; then \
+			echo "Manifests not up-to-date:" ; \
+			echo "$${FOUND}" ; \
+			exit 1 ; \
+		fi ; \
+	)
 
 #
 # Verify Manifest Filetypes
@@ -103,28 +103,31 @@ mpp-verify: mpp-generate
 
 .PHONY: mtype-verify
 mtype-verify:
-	@FOUND=$$( \
-		$(BIN_FIND) \
-			$(call FN_SRCDIR,manifests) \
-				\( \
-				-path "$(call FN_SRCDIR,manifests/by-checksum)/*" \
-				-and \
-				-not \( -type f -or -type d \) \
-				-print \
-				\) \
-			-or \
-				\( \
-				-not -path "$(call FN_SRCDIR,manifests/by-checksum)/*" \
-				-and \
-				-not \( -type l -or -type d \) \
-				-print \
-				\) \
-	) ; \
-	if [[ ! -z $${FOUND} ]]; then \
-		echo "Wrong manifest file-types:" ; \
-		echo "$${FOUND}" ; \
-		exit 1 ; \
-	fi
+	( \
+		set -e ; \
+		FOUND=$$( \
+			$(BIN_FIND) \
+				$(call FN_SRCDIR,manifests) \
+					\( \
+					-path "$(call FN_SRCDIR,manifests/by-checksum)/*" \
+					-and \
+					-not \( -type f -or -type d \) \
+					-print \
+					\) \
+				-or \
+					\( \
+					-not -path "$(call FN_SRCDIR,manifests/by-checksum)/*" \
+					-and \
+					-not \( -type l -or -type d \) \
+					-print \
+					\) \
+		) ; \
+		if [[ ! -z $${FOUND} ]]; then \
+			echo "Wrong manifest file-types:" ; \
+			echo "$${FOUND}" ; \
+			exit 1 ; \
+		fi ; \
+	)
 
 #
 # Verify Manifest Formatting

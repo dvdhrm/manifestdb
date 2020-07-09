@@ -147,7 +147,7 @@ class MdbPrefetch:
 
                 with open(path, "rb") as filp:
                     hashproc = hashlib.sha256()
-                    for block in iter(lambda: filp.read(4096), b''):
+                    for block in iter(lambda ctx=filp: ctx.read(4096), b''):
                         hashproc.update(block)
 
                     if "sha256:" + hashproc.hexdigest() != checksum:
@@ -158,7 +158,7 @@ class MdbPrefetch:
                 with urllib.request.urlopen(url) as stream:
                     with open_tmpfile(dirpath, mode=0o644) as ctx:
                         hashproc = hashlib.sha256()
-                        for block in iter(lambda: stream.read(4096), b''):
+                        for block in iter(lambda ctx=stream: ctx.read(4096), b''):
                             hashproc.update(block)
                             ctx["stream"].write(block)
 

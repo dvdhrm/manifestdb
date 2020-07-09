@@ -82,7 +82,7 @@ mpp-generate: | ${BUILDDIR}/cache/
 		set -e ; \
 		./mdb.sh \
 			preprocess \
-			--cache "${BUILDDIR}/cache"
+			--cache "${BUILDDIR}/cache" \
 			--dstdir "./manifests" \
 			--srcdir "./src/manifests" \
 			. ; \

@@ -18,16 +18,16 @@ jobs:
     - name: "Enumerate Manifests"
       id: enumerate
       run: |
-        MANIFESTS="$(make --silent msrc-list-diff "MSRC_TOKEN=${{ github.token }}")"
+        MANIFESTS="$(make --silent msrc-list-diff 'MSRC_TOKEN=${{ github.token }}')"
         N_MANIFESTS="$(echo "${MANIFESTS}" | jq -c '. | length')"
         echo "::set-output name=manifests::${MANIFESTS}"
         echo "::set-output name=n_manifests::${N_MANIFESTS}"
     - name: "Print Manifest List"
       run: |
-        echo "${{ steps.enumerate.outputs.manifests }}" | jq .
+        echo '${{ steps.enumerate.outputs.manifests }}' | jq .
     - name: "Print Variables"
       run: |
-        echo "n_manifests: ${{ steps.enumerate.outputs.n_manifests }}"
+        echo 'n_manifests: ${{ steps.enumerate.outputs.n_manifests }}'
 
   msrc:
     name: "Prefetch Sources"
@@ -46,5 +46,5 @@ jobs:
       with:
         image: docker.pkg.github.com/osbuild/containers/ghci-manifestdb:v1
         run: |
-          docker login docker.pkg.github.com -u "${{ github.actor }}" -p "${{ github.token }}"
-          make msrc-push "MSRC_MANIFEST=by-checksum/${{ matrix.manifest }}"
+          docker login docker.pkg.github.com -u '${{ github.actor }}' -p '${{ github.token }}'
+          make msrc-push 'MSRC_MANIFEST=by-checksum/${{ matrix.manifest }}'

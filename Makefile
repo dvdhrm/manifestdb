@@ -77,12 +77,12 @@ FORCE:
 #
 
 .PHONY: mpp-generate
-mpp-generate: | ${BUILDDIR}/cache/
+mpp-generate: | $(BUILDDIR)/cache/
 	( \
 		set -e ; \
 		./mdb.sh \
+			--cache "$(BUILDDIR)/cache" \
 			preprocess \
-			--cache "${BUILDDIR}/cache" \
 			--dstdir "./manifests" \
 			--srcdir "./src/manifests" \
 			. ; \

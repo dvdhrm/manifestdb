@@ -13,10 +13,12 @@ import argparse
 import contextlib
 import errno
 import hashlib
+import json
 import os
 import stat
 import subprocess
 import sys
+import urllib.request
 
 
 @contextlib.contextmanager
@@ -77,6 +79,103 @@ class MdbBuild:
     # pylint: disable=no-self-use
     def run(self):
         """Run database command"""
+
+        return 0
+
+
+class MdbPrefetch:
+    """Database Command"""
+
+    def __init__(self, mdb):
+        self._mdb = mdb
+
+    def _collect(self):
+        sources = {
+            "org.osbuild.files": {"urls": {}},
+        }
+
+        for itr in self._mdb.args.PATH:
+            # Parse specified file as JSON document.
+            try:
+                with open(itr, "r") as filp:
+                    data = json.load(filp)
+            except json.JSONDecodeError:
+                print(f"Cannot decode JSON in '{itr}'", file=sys.stderr)
+                raise
+            except OSError:
+                print(f"Cannot open '{itr}'", file=sys.stderr)
+                raise
+
+            # Fetch "sources" and verify it is a dictionary.
+            src = data.get("sources", {})
+            if not isinstance(src, dict):
+                raise ValueError(f"Sources definition not a dictionary in '{itr}'")
+
+            # For each source, verify its content and merge into `sources`.
+            for kind, args in src.items():
+                if not isinstance(args, dict):
+                    raise ValueError(f"Source entry '{kind}' not a dictionary in '{itr}'")
+
+                if kind == "org.osbuild.files":
+                    urls = args.get("urls", {})
+                    if not isinstance(src, dict):
+                        raise ValueError(f"URL collection not a dictionary in '{itr}'")
+
+                    sources[kind]["urls"].update(urls)
+                else:
+                    raise ValueError(f"Unsupported source type '{kind}' in '{itr}'")
+
+        return sources
+
+    def _process_org_osbuild_files(self, args):
+        urls = args.get("urls", {})
+        if not urls:
+            return
+
+        dirpath = os.path.join(self._mdb.args.output, "org.osbuild.files")
+        os.makedirs(dirpath, exist_ok=True)
+
+        for checksum, url in urls.items():
+            path = os.path.join(dirpath, checksum)
+
+            print(f"Next source: {checksum}")
+            print(f"             {path}")
+            print(f"             {url}")
+
+            if os.access(path, os.R_OK):
+                print("             (cached)")
+
+                with open(path, "rb") as filp:
+                    hashproc = hashlib.sha256()
+                    for block in iter(lambda: filp.read(4096), b''):
+                        hashproc.update(block)
+
+                    if "sha256:" + hashproc.hexdigest() != checksum:
+                        raise ValueError(f"Wrong checksum in '{path}'")
+            else:
+                print("             (download)")
+
+                with urllib.request.urlopen(url) as stream:
+                    with open_tmpfile(dirpath, mode=0o644) as ctx:
+                        hashproc = hashlib.sha256()
+                        for block in iter(lambda: stream.read(4096), b''):
+                            hashproc.update(block)
+                            ctx["stream"].write(block)
+
+                        if "sha256:" + hashproc.hexdigest() != checksum:
+                            raise ValueError(f"Checksum mismatch for '{url}'")
+
+                        ctx["name"] = checksum
+
+    def run(self):
+        """Run database command"""
+
+        sources = self._collect()
+        for kind, args in sources.items():
+            if kind == "org.osbuild.files":
+                self._process_org_osbuild_files(args)
+            else:
+                raise ValueError(f"Unsupported source type '{kind}' leaked from data collector")
 
         return 0
 
@@ -202,6 +301,29 @@ class Mdb(contextlib.AbstractContextManager):
             prog=f"{self._parser.prog} build",
         )
 
+        db_prefetch = db.add_parser(
+            "prefetch",
+            add_help=True,
+            allow_abbrev=False,
+            argument_default=None,
+            description="Prefetch sources of osbuild manifests",
+            help="Prefetch manifest sources",
+            prog=f"{self._parser.prog} prefetch",
+        )
+        db_prefetch.add_argument(
+            "--output",
+            help="Path to output directory",
+            metavar="PATH",
+            required=True,
+            type=os.path.abspath,
+        )
+        db_prefetch.add_argument(
+            "PATH",
+            help="Path to manifests to prefetch sources of",
+            nargs="+",
+            type=str,
+        )
+
         db_preprocess = db.add_parser(
             "preprocess",
             add_help=True,
@@ -256,6 +378,8 @@ class Mdb(contextlib.AbstractContextManager):
             ret = 1
         elif self.args.cmd == "build":
             ret = MdbBuild(self).run()
+        elif self.args.cmd == "prefetch":
+            ret = MdbPrefetch(self).run()
         elif self.args.cmd == "preprocess":
             ret = MdbPreprocess(self).run()
         else:

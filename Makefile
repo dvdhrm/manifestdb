@@ -7,6 +7,7 @@ SHELL = /bin/bash
 BUILDDIR ?= .
 SRCDIR ?= .
 
+BIN_CP ?= cp
 BIN_CURL ?= curl
 BIN_DOCKER ?= docker
 BIN_FIND ?= find
@@ -21,6 +22,12 @@ FN_BUILDDIR = $(patsubst ./%,%,$(BUILDDIR)/$(1))
 FN_SRCDIR = $(patsubst ./%,%,$(SRCDIR)/$(1))
 
 MAKE_SILENT = $(MAKE) --no-print-directory --silent
+
+MSRC_IMAGE ?= sources
+MSRC_REGISTRY ?= docker.pkg.github.com
+MSRC_REPOSITORY ?= osbuild/manifestdb
+MSRC_TOKEN ?=
+MSRC_TRIPLE = $(MSRC_REGISTRY)/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)
 
 #
 # Generic Targets
@@ -46,6 +53,14 @@ MAKE_SILENT = $(MAKE) --no-print-directory --silent
 #         Dummy target to use as dependency to force `.PHONY` behavior on
 #         targets that cannot use `.PHONY`.
 #
+#     in-srcdir:
+#         This target asserts that `$(SRCDIR)` refers to the current working
+#         directory. Note that `$(BUILDDIR)` might still refer to other
+#         directories, and we always support out-of-tree builds. However, some
+#         commands (e.g., `git`) do not support specifying a directory for all
+#         possible commands, so some targets may need to be run from the source
+#         directory.
+#
 
 .PHONY: help
 help:
@@ -64,6 +79,83 @@ $(BUILDDIR)/%/:
 
 FORCE:
 
+.PHONY: in-srcdir
+in-srcdir:
+	$(if \
+		$(subst $(abspath $(CURDIR)),,$(abspath $(SRCDIR))), \
+		$(error Changes to SRCDIR not supported by this target) \
+	)
+
+#
+# Manifest Enumeration
+#
+# This provides some helper collections for all the manifest-targets. It lists
+# available manifests and provides them as collections.
+#
+# Different targets are provided that produce JSON formatted manifest lists:
+#
+#   mlist-checksum:
+#     Produces a JSON array with all manifests checksums (i.e., an enumeration
+#     of `./manifests/by-checksum/`).
+#
+#   mlist-checksum-diff:
+#     Produces a subset of `mlist-checksum` including only the manifests that
+#     have changes between git-revision `$(MLIST_A)` and `$(MLIST_B)`.
+#
+#   mlist-msrc:
+#     List all manifest checksums which have a source-image cached via the
+#     `msrc` targets. This queries the registry set in `$(MSRC_REGISTRY)` to
+#     return a list of stored source-images.
+#
+#   mlist-msrc-diff:
+#     Produces the difference of `mlist-checksum` and `mlist-msrc`, listing
+#     only the manifests that lack a source-image in `$(MSRC_REGISTRY)`.
+#
+
+MANIFEST_PATHS = $(wildcard $(SRCDIR)/manifests/by-checksum/*)
+MANIFEST_FILES = $(patsubst $(SRCDIR)/manifests/by-checksum/%,%,$(MANIFEST_PATHS))
+
+.PHONY: mlist-checksum
+mlist-checksum:
+	$(BIN_LS) \
+			-1b \
+			"$(SRCDIR)/manifests/by-checksum" \
+		| $(BIN_JQ) -cR . \
+		| $(BIN_JQ) -cs .
+
+.PHONY: mlist-checksum-diff
+mlist-checksum-diff: in-srcdir
+	$(if $(MLIST_A),,$(error MLIST_A must be set))
+	$(if $(MLIST_B),,$(error MLIST_B must be set))
+	$(BIN_GIT) \
+			diff \
+			--diff-filter=d \
+			--name-only \
+			--relative=manifests/by-checksum \
+			"$(MLIST_A)" \
+			"$(MLIST_B)" \
+			-- \
+			"./manifests/by-checksum" \
+		| $(BIN_JQ) -cR . \
+		| $(BIN_JQ) -cs .
+
+.PHONY: mlist-msrc
+mlist-msrc:
+	$(if $(MSRC_TOKEN),,$(error MSRC_TOKEN must be set))
+	$(BIN_CURL) \
+			--get \
+			--header "Accept: application/json" \
+			--header "Authorization: Bearer $(MSRC_TOKEN)" \
+			--silent \
+			"https://$(MSRC_REGISTRY)/v2/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)/tags/list" \
+		| $(BIN_JQ) -c \
+			'.["tags"] - ["docker-base-layer"]'
+
+.PHONY: mlist-msrc-diff
+mlist-msrc-diff:
+	echo "$$($(MAKE_SILENT) mlist-checksum)" "$$($(MAKE_SILENT) mlist-msrc)" \
+		| $(BIN_JQ) -cs '.[0] - .[1]'
+
 #
 # Manifest Generation
 #
@@ -71,25 +163,45 @@ FORCE:
 # `./src/manifests/`. This allows us to dynamically create manifests for
 # testing purposes.
 #
-# Note that we always commit all generated manifests. Therefore, another
-# target is provided that verifies re-generating them does not create any
-# uncommitted content.
+
+.PHONY: mpp
+mpp: | $(BUILDDIR)/cache/
+	./mdb.sh \
+		--cache "$(BUILDDIR)/cache" \
+		preprocess \
+		--dstdir "$(SRCDIR)/manifests" \
+		--srcdir "$(SRCDIR)/src/manifests" \
+		.
+
+#
+# Manifest Verification
+#
+# The `verify-*` targets run basic sanity checks on all manifests in the
+# database:
+#
+#   verify-diff:
+#     Check that all files in the manifest database are committed. Usually,
+#     this is run after regenerating manifests, and thus checking that all
+#     content is committed properly.
+#
+#   verify-format:
+#     Run `osbuild --inspect` on all (or selected) manifests, verifying that
+#     the file-format is valid.
+#
+#   verify-type:
+#     Check that files in `manifests/by-checksum/*` are proper files, and
+#     anything else in `manifests/*` is either a directory or a symlink.
 #
 
-.PHONY: mpp-generate
-mpp-generate: | $(BUILDDIR)/cache/
-	( \
-		set -e ; \
-		./mdb.sh \
-			--cache "$(BUILDDIR)/cache" \
-			preprocess \
-			--dstdir "./manifests" \
-			--srcdir "./src/manifests" \
-			. ; \
-	)
+VERIFY_FORMAT = $(patsubst %,verify-format-%,$(MANIFEST_FILES))
 
-.PHONY: mpp-verify
-mpp-verify: mpp-generate
+$(VERIFY_FORMAT): verify-format-%: FORCE
+	$(BIN_OSBUILD) \
+		--inspect "$(SRCDIR)/manifests/by-checksum/$*" \
+		>/dev/null
+
+.PHONY: verify-diff
+verify-diff: in-srcdir
 	( \
 		set -e ; \
 		FOUND=$$( \
@@ -102,16 +214,11 @@ mpp-verify: mpp-generate
 		fi ; \
 	)
 
-#
-# Verify Manifest Filetypes
-#
-# The `mtype-verify` command checks all files and directories in `./manifests/`
-# and verifies files outside of `by-checksum` must be symlinks. We only allow
-# manifests inserted by their checksum, every other index must be a reference.
-#
+.PHONY: verify-format
+verify-format: $(VERIFY_FORMAT)
 
-.PHONY: mtype-verify
-mtype-verify:
+.PHONY: verify-type
+verify-type:
 	( \
 		set -e ; \
 		FOUND=$$( \
@@ -139,24 +246,6 @@ mtype-verify:
 	)
 
 #
-# Verify Manifest Formatting
-#
-# Run `osbuild --inspect` on all manifests under `./manifests/by-checksum/`
-# and thus verify that they are valid manifests.
-#
-
-MFORMAT_MANIFESTS = $(wildcard $(SRCDIR)/manifests/by-checksum/*)
-MFORMAT_TARGETS = $(patsubst %,mformat-%,$(MFORMAT_MANIFESTS))
-
-$(MFORMAT_TARGETS): mformat-%: FORCE
-	$(BIN_OSBUILD) \
-		--inspect "$*" \
-		>/dev/null
-
-.PHONY: mformat-verify
-mformat-verify: $(MFORMAT_TARGETS)
-
-#
 # Push/Pull Manifest Sources
 #
 # Prefetch sources of a manifest, stash them into a docker image and upload
@@ -168,22 +257,19 @@ mformat-verify: $(MFORMAT_TARGETS)
 #
 # The images are tagged with the manifest-checksum.
 #
-# The `msrc-list` helper target lists all tags from the remote registry. It
-# is meant for checking which sources already exist. The `msrc-list-diff`
-# target takes this list and subtracts it from the list of `mlist`, thus
-# showing all manifests that lack a source image.
-#
 
-MSRC_IMAGE ?= sources
-MSRC_REGISTRY ?= docker.pkg.github.com
-MSRC_REPOSITORY ?= osbuild/manifestdb
-MSRC_TRIPLE = $(MSRC_REGISTRY)/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)
+MSRC_PREFETCH = $(patsubst %,msrc-prefetch-%,$(MANIFEST_FILES))
+MSRC_PULL = $(patsubst %,msrc-pull-%,$(MANIFEST_FILES))
+MSRC_PUSH = $(patsubst %,msrc-push-%,$(MANIFEST_FILES))
+MSRC_WIPE = $(patsubst %,msrc-wipe-%,$(MANIFEST_FILES))
 
-MSRC_MANIFESTS = $(wildcard $(SRCDIR)/manifests/by-checksum/*)
-MSRC_PULL = $(patsubst %,msrc-pull-%,$(MSRC_MANIFESTS))
-MSRC_PUSH = $(patsubst %,msrc-push-%,$(MSRC_MANIFESTS))
+$(MSRC_PREFETCH): msrc-prefetch-%: FORCE | $(BUILDDIR)/msrc/%/sources/
+	./mdb.sh \
+		prefetch \
+		--output "$(BUILDDIR)/msrc/$*/sources" \
+		"$(SRCDIR)/manifests/by-checksum/$*"
 
-$(MSRC_PULL): msrc-pull-$(SRCDIR)/manifests/by-checksum/%: FORCE | $(BUILDDIR)/msrc/%/sources/
+$(MSRC_PULL): msrc-pull-%: FORCE | $(BUILDDIR)/msrc/%/sources/
 	$(BIN_DOCKER) \
 		pull \
 		"$(MSRC_TRIPLE):$*"
@@ -206,11 +292,7 @@ $(MSRC_PULL): msrc-pull-$(SRCDIR)/manifests/by-checksum/%: FORCE | $(BUILDDIR)/m
 		rm \
 		"$(MSRC_TRIPLE):$*"
 
-$(MSRC_PUSH): msrc-push-$(SRCDIR)/manifests/by-checksum/%: FORCE | $(BUILDDIR)/msrc/%/sources/
-	./mdb.sh \
-		prefetch \
-		--output "$(BUILDDIR)/msrc/$*/sources" \
-		"$(SRCDIR)/manifests/by-checksum/$*"
+$(MSRC_PUSH): msrc-push-%: msrc-prefetch-% | $(BUILDDIR)/msrc/%/sources/
 	$(BIN_TAR) \
 			-c \
 			-C "$(BUILDDIR)/msrc/$*" \
@@ -227,44 +309,66 @@ $(MSRC_PUSH): msrc-push-$(SRCDIR)/manifests/by-checksum/%: FORCE | $(BUILDDIR)/m
 		rm \
 		"$(MSRC_TRIPLE):$*"
 
-.PHONY: msrc-list
-msrc-list:
-	$(if $(MSRC_TOKEN),,$(error MSRC_TOKEN must be set))
-	$(BIN_CURL) \
-			--get \
-			--header "Accept: application/json" \
-			--header "Authorization: Bearer $(MSRC_TOKEN)" \
-			--silent \
-			"https://$(MSRC_REGISTRY)/v2/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)/tags/list" \
-		| $(BIN_JQ) -c \
-			'.["tags"] - ["docker-base-layer"]'
+$(MSRC_WIPE): msrc-wipe-%: FORCE
+	$(BIN_TAR) \
+			-c \
+			--files-from /dev/null \
+		| $(BIN_DOCKER) \
+			import \
+			- \
+			"$(MSRC_TRIPLE):$*"
+	$(BIN_DOCKER) \
+		push \
+		"$(MSRC_TRIPLE):$*"
+	$(BIN_DOCKER) \
+		image \
+		rm \
+		"$(MSRC_TRIPLE):$*"
 
-.PHONY: msrc-list-diff
-msrc-list-diff:
-	echo "$$($(MAKE_SILENT) mlist)" "$$($(MAKE_SILENT) msrc-list)" \
-		| $(BIN_JQ) -cs '.[0] - .[1]'
+.PHONY: msrc-prefetch
+msrc-prefetch:
+	$(if $(MANIFEST),,$(error MANIFEST must be set))
+	$(MAKE) msrc-prefetch-$(MANIFEST)
 
 .PHONY: msrc-pull
 msrc-pull:
-	$(if $(MSRC_MANIFEST),,$(error MSRC_MANIFEST must be set))
-	$(MAKE) msrc-pull-$(SRCDIR)/manifests/$(MSRC_MANIFEST)
+	$(if $(MANIFEST),,$(error MANIFEST must be set))
+	$(MAKE) msrc-pull-$(MANIFEST)
 
 .PHONY: msrc-push
 msrc-push:
-	$(if $(MSRC_MANIFEST),,$(error MSRC_MANIFEST must be set))
-	$(MAKE) msrc-push-$(SRCDIR)/manifests/$(MSRC_MANIFEST)
+	$(if $(MANIFEST),,$(error MANIFEST must be set))
+	$(MAKE) msrc-push-$(MANIFEST)
+
+.PHONY: msrc-wipe
+msrc-wipe:
+	$(if $(MANIFEST),,$(error MANIFEST must be set))
+	$(MAKE) msrc-wipe-$(MANIFEST)
 
 #
-# Manifest List
+# Manifest Test
 #
-# List all manifests by their checksum. This simply turns the directory listing
-# from `./manifests/by-checksum/` into a JSON array.
+# WIP
 #
 
-.PHONY: mlist
-mlist:
-	$(BIN_LS) \
-			-1b \
-			"$(SRCDIR)/manifests/by-checksum" \
-		| $(BIN_JQ) -cR . \
-		| $(BIN_JQ) -cs .
+MTEST_BUILD = $(patsubst %,mtest-build-%,$(MANIFEST_FILES))
+MTEST_MSRC = $(patsubst %,mtest-msrc-%,$(MANIFEST_FILES))
+
+$(MTEST_BUILD): mtest-build-%: FORCE | $(BUILDDIR)/mtest/%/output/ $(BUILDDIR)/mtest/%/store/
+	$(BIN_OSBUILD) \
+		--output-directory "$(BUILDDIR)/mtest/$*/output" \
+		--store "$(BUILDDIR)/mtest/$*/store" \
+		"$(SRCDIR)/manifests/by-checksum/$*"
+
+$(MTEST_MSRC): mtest-msrc-%: FORCE | $(BUILDDIR)/mtest/%/store/
+	$(BIN_CP) \
+		--link \
+		--recursive \
+		-- \
+		"$(BUILDDIR)/msrc/$*/sources" \
+		"$(BUILDDIR)/mtest/$*/store/"
+
+.PHONY: mtest-build
+mtest-build:
+	$(if $(MANIFEST),,$(error MANIFEST must be set))
+	$(MAKE) mtest-build-$(MANIFEST)

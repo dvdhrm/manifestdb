@@ -1,0 +1,53 @@
+#
+# Continuous Integration
+#
+# This workflow runs on all PRs and branches on every modification, as well as
+# on a regular interval. It runs all continuous testing that can finish in a
+# reasonable timeframe. It does not require preprocessing of the sources and
+# can run on any checkout.
+#
+
+name: "Continuous Integration"
+
+on:
+  push:
+  pull_request:
+  schedule:
+  - cron:  '0 0 * * *'
+
+jobs:
+  unittest:
+    name: "Unittest"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+        - "src.test.test_pylint"
+    steps:
+    - name: "Clone Repository"
+      uses: actions/checkout@v2
+    - name: "Run Unittest"
+      uses: osbuild/containers/src/actions/ghci-osbuild@v1
+      with:
+        image: docker.pkg.github.com/osbuild/containers/ghci-manifestdb:v1
+        run: |
+          python3 -m unittest discover \
+            -k "${{ matrix.test }}" \
+            -s "src/test" \
+            -t . \
+            -v
+
+  verify:
+    name: "Manifest Verification"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Clone Repository"
+      uses: actions/checkout@v2
+    - name: "Run Check"
+      uses: osbuild/containers/src/actions/ghci-osbuild@v1
+      with:
+        image: docker.pkg.github.com/osbuild/containers/ghci-manifestdb:v1
+        run: |
+          make mpp
+          make verify-diff verify-format verify-type

@@ -1,0 +1,43 @@
+#
+# Repository Management
+#
+# This workflow contains custom hooks that can be triggered through the
+# `repository_dispatch` feature of the GitHub API.
+#
+
+name: "Repository Management"
+
+on: [repository_dispatch]
+
+jobs:
+  #
+  # Restart Hook
+  #
+  # This hook takes a `run_id` parameter and then triggers a restart of the
+  # specified Github Workflow run. You can use this from other workflows just
+  # before exiting. Note that only finished workflows can be restarted, so we
+  # rely on the workflow-setup taking a short amount of time. Additionally,
+  # we always explicitly wait for a minute before triggering the restart as a
+  # safety measure.
+  #
+  restart:
+    name: "Workflow Restart Trigger"
+    if: >-
+      github.repository == 'osbuild/manifestdb'
+      && github.event.action == 'restart'
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Trigger a restart"
+      env:
+        OSBUILT_REPO_PAT: ${{secrets.OSBUILT_REPO_PAT}}
+        REPOSITORY: ${{github.repository}}
+        RUN_ID: ${{github.event.client_payload.run_id}}
+      run: |
+        sleep 60
+        curl \
+          --data "{}" \
+          --fail \
+          --header "Content-Type: application/json" \
+          --user "osbuilt:${OSBUILT_REPO_PAT}" \
+          --verbose \
+          "https://api.github.com/repos/${REPOSITORY}/actions/runs/${RUN_ID}/rerun"

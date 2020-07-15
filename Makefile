@@ -165,7 +165,7 @@ mlist-msrc-diff:
 #
 
 .PHONY: mpp
-mpp: | $(BUILDDIR)/cache/
+mpp: in-srcdir | $(BUILDDIR)/cache/
 	./mdb.sh \
 		--cache "$(BUILDDIR)/cache" \
 		preprocess \
@@ -263,7 +263,7 @@ MSRC_PULL = $(patsubst %,msrc-pull-%,$(MANIFEST_FILES))
 MSRC_PUSH = $(patsubst %,msrc-push-%,$(MANIFEST_FILES))
 MSRC_WIPE = $(patsubst %,msrc-wipe-%,$(MANIFEST_FILES))
 
-$(MSRC_PREFETCH): msrc-prefetch-%: FORCE | $(BUILDDIR)/msrc/%/sources/
+$(MSRC_PREFETCH): msrc-prefetch-%: FORCE in-srcdir | $(BUILDDIR)/msrc/%/sources/
 	./mdb.sh \
 		prefetch \
 		--output "$(BUILDDIR)/msrc/$*/sources" \

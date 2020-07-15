@@ -70,19 +70,6 @@ def open_tmpfile(dirpath, mode=0o777):
             os.close(dirfd)
 
 
-class MdbBuild:
-    """Database Command"""
-
-    def __init__(self, mdb):
-        self._mdb = mdb
-
-    # pylint: disable=no-self-use
-    def run(self):
-        """Run database command"""
-
-        return 0
-
-
 class MdbPrefetch:
     """Database Command"""
 
@@ -293,16 +280,6 @@ class Mdb(contextlib.AbstractContextManager):
             title="Database Maintenance",
         )
 
-        _db_build = db.add_parser(
-            "build",
-            add_help=True,
-            allow_abbrev=False,
-            argument_default=None,
-            description="Run osbuild pipelines defined by a manifest",
-            help="Run manifest pipelines",
-            prog=f"{self._parser.prog} build",
-        )
-
         db_prefetch = db.add_parser(
             "prefetch",
             add_help=True,
@@ -378,8 +355,6 @@ class Mdb(contextlib.AbstractContextManager):
             print("No subcommand specified", file=sys.stderr)
             self._parser.print_help(file=sys.stderr)
             ret = 1
-        elif self.args.cmd == "build":
-            ret = MdbBuild(self).run()
         elif self.args.cmd == "prefetch":
             ret = MdbPrefetch(self).run()
         elif self.args.cmd == "preprocess":

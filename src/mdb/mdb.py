@@ -250,6 +250,41 @@ class MdbPreprocess:
         return 0
 
 
+class MdbReformat:
+    """Database Command"""
+
+    def __init__(self, mdb):
+        self._mdb = mdb
+
+    @staticmethod
+    def _import(stream):
+        try:
+            data = json.load(stream)
+        except json.JSONDecodeError:
+            print("Cannot decode streamed JSON", file=sys.stderr)
+            raise
+
+        return data
+
+    @staticmethod
+    def _export(stream, data):
+        try:
+            json.dump(data, stream, indent=2, sort_keys=True)
+            print(end="\n", file=stream)
+        except TypeError:
+            print("Cannot encode streamed JSON", file=sys.stderr)
+            raise
+
+    # pylint: disable=no-self-use
+    def run(self):
+        """Run database command"""
+
+        data = self._import(sys.stdin)
+        self._export(sys.stdout, data)
+
+        return 0
+
+
 class Mdb(contextlib.AbstractContextManager):
     """Manifest Database"""
 
@@ -333,6 +368,16 @@ class Mdb(contextlib.AbstractContextManager):
             type=str,
         )
 
+        _db_reformat = db.add_parser(
+            "reformat",
+            add_help=True,
+            allow_abbrev=False,
+            argument_default=None,
+            description="Reformat JSON document to be deterministic",
+            help="Reformat JSON document",
+            prog=f"{self._parser.prog} reformat",
+        )
+
         return self._parser.parse_args(self._argv[1:])
 
     def __enter__(self):
@@ -359,6 +404,8 @@ class Mdb(contextlib.AbstractContextManager):
             ret = MdbPrefetch(self).run()
         elif self.args.cmd == "preprocess":
             ret = MdbPreprocess(self).run()
+        elif self.args.cmd == "reformat":
+            ret = MdbReformat(self).run()
         else:
             raise RuntimeError("Subcommand mismatch")
 

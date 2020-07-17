@@ -1,0 +1,17 @@
+dist: bionic
+language: python
+os: linux
+
+jobs:
+  include:
+  - arch: amd64
+  - arch: arm64
+  - arch: ppc64le
+  - arch: s390x
+
+services:
+- docker
+
+script:
+- ls -la /dev
+- ls -la /

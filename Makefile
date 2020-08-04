@@ -14,14 +14,15 @@ BIN_FIND ?= find
 BIN_GIT ?= git
 BIN_JQ ?= jq
 BIN_LS ?= ls
+BIN_MKDIR ?= mkdir
 BIN_OSBUILD ?= osbuild
 BIN_PYTHON3 ?= python3
 BIN_TAR ?= tar
 
+MAKE_SILENT = $(MAKE) --no-print-directory --silent
+
 FN_BUILDDIR = $(patsubst ./%,%,$(BUILDDIR)/$(1))
 FN_SRCDIR = $(patsubst ./%,%,$(SRCDIR)/$(1))
-
-MAKE_SILENT = $(MAKE) --no-print-directory --silent
 
 MSRC_IMAGE ?= sources
 MSRC_REGISTRY ?= docker.pkg.github.com
@@ -72,10 +73,10 @@ help:
 	@echo "    help:               Print this usage information."
 
 $(BUILDDIR)/:
-	mkdir -p "$@"
+	$(BIN_MKDIR) -p "$@"
 
 $(BUILDDIR)/%/:
-	mkdir -p "$@"
+	$(BIN_MKDIR) -p "$@"
 
 FORCE:
 

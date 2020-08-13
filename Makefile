@@ -393,93 +393,67 @@ mtest-build:
 	$(MAKE) mtest-build-$(MANIFEST)
 
 #
-# Distrepo Management
+# RPM-Repo Management
 #
 # WIP
 #
 
-DISTREPO_METALINK ?=
-DISTREPO_MODULEID ?=
-DISTREPO_OS ?=
+RPMREPO_METALINK ?=
+RPMREPO_MODULEID ?=
+RPMREPO_OS ?=
 
-$(BUILDDIR)/cache/distrepo/empty: | $(BUILDDIR)/cache/distrepo/
+$(BUILDDIR)/cache/rpmrepo/empty: | $(BUILDDIR)/cache/rpmrepo/
 	$(BIN_TOUCH) "$@"
 
-$(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml: \
-		| $(BUILDDIR)/cache/distrepo/root/%/ \
-		  $(BUILDDIR)/distrepo/%/repo0/ \
-		  $(BUILDDIR)/distrepo/%/rpm/
-	$(if $(DISTREPO_METALINK),,$(error DISTREPO_METALINK must be set))
-	$(if $(DISTREPO_MODULEID),,$(error DISTREPO_MODULEID must be set))
-	$(BIN_LN) -fs "../rpm" "$(BUILDDIR)/distrepo/$*/repo0/Packages"
-	echo "[main]"                                    >"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
-	echo "module_platform_id=$(DISTREPO_MODULEID)"  >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
-	echo "[repo0]"                                  >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
-	echo "name=repo0"                               >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
-	echo "metalink=$(DISTREPO_METALINK)"            >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
+$(BUILDDIR)/rpmrepo/repo/%/hash: \
+		| $(BUILDDIR)/cache/rpmrepo/root/%/ \
+		  $(BUILDDIR)/rpmrepo/repo/%/repo0/ \
+		  $(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/ \
+	$(if $(RPMREPO_METALINK),,$(error RPMREPO_METALINK must be set))
+	$(if $(RPMREPO_MODULEID),,$(error RPMREPO_MODULEID must be set))
+	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
+	$(BIN_LN) -fs "../../../rpm/$(RPMREPO_OS)" "$(BUILDDIR)/rpmrepo/repo/$*/repo0/Packages"
+	echo "[main]"                                            >"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
+	echo "module_platform_id=platform:$(RPMREPO_MODULEID)"  >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
+	echo "[repo0]"                                          >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
+	echo "name=repo0"                                       >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
+	echo "metalink=$(RPMREPO_METALINK)"                     >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
 	$(BIN_DNF) \
 		-v \
 		reposync \
-			--config "$(BUILDDIR)/cache/distrepo/dnf.$*.conf" \
-			--installroot "$(abspath $(BUILDDIR))/cache/distrepo/root/$*" \
+			--config "$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf" \
+			--installroot "$(abspath $(BUILDDIR))/cache/rpmrepo/root/$*" \
 			--setopt "fastestmirror=true" \
 			--setopt "reposdir=" \
 			--setopt "skip_if_unavailable=false" \
 			\
 			--download-metadata \
-			--download-path "$(BUILDDIR)/distrepo/$*/rpm" \
-			--metadata-path "$(BUILDDIR)/distrepo/$*/" \
+			--download-path "$(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/" \
+			--metadata-path "$(BUILDDIR)/rpmrepo/repo/$*/" \
 			--norepopath
+	$(BIN_SHA256SUM) <"$(BUILDDIR)/rpmrepo/repo/%/repo0/repodata/repomd.xml" \
+		| $(BIN_CUT) -d " " -f 1 >"$(@)"
 
-$(BUILDDIR)/distrepo/%/hash: \
-		$(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml \
-		| $(BUILDDIR)/distrepo/%/repo/
-	$(BIN_SHA256SUM) <"$<" | $(BIN_CUT) -d " " -f 1 >"$(@)v"
-	$(BIN_LN) -fs "../repo0" "$(BUILDDIR)/distrepo/$*/repo/$*-$$(cat "$(@)v")"
-	$(BIN_MV) "$(@)v" "$@"
-
-$(BUILDDIR)/distrepo/%/metadata.s3sync: \
-		$(BUILDDIR)/distrepo/%/hash
-	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
+$(BUILDDIR)/rpmrepo/repo/%/metadata.s3sync: \
+		$(BUILDDIR)/rpmrepo/repo/%/hash
 	echo "Synchronize metadata to S3..."
 	$(BIN_S3CMD) \
 		--acl-public \
 		--follow-symlinks \
 		sync \
-			"$(BUILDDIR)/distrepo/$*/repo0/repodata/" \
-			"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/repodata/"
-	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/metadata.s3sync"
-	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
+			"$(BUILDDIR)/rpmrepo/repo/$*/repo0/repodata/" \
+			"s3://manifestdb/rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/repodata/"
+	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/metadata.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"
 
-$(BUILDDIR)/distrepo/%/pkglink.s3sync: \
-		$(BUILDDIR)/cache/distrepo/empty \
-		$(BUILDDIR)/distrepo/%/hash
-	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
-	echo "Synchronize package-links to S3..."
-	$(BIN_FIND) \
-			"$(BUILDDIR)/distrepo/$*/repo0/Packages" \
-			-type f \
-			-printf "%P\0" \
-		| $(BIN_XARGS) \
-			"-I{}" \
-			--null \
-			$(BIN_S3CMD) \
-				--acl-public \
-				--add-header="x-amz-website-redirect-location:/distrepo/$(DISTREPO_OS)/rpm/{}" \
-				put \
-					"$(BUILDDIR)/cache/distrepo/empty" \
-					"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/Packages/{}"
-	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/pkglink.s3sync"
-	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
-
-$(BUILDDIR)/distrepo/%/pkgrpm.s3sync: \
-		$(BUILDDIR)/distrepo/%/hash
-	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
-	echo "Synchronize package-rpms to S3..."
+$(BUILDDIR)/rpmrepo/repo/%/rpm.s3sync: \
+		$(BUILDDIR)/rpmrepo/repo/%/hash
+	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
+	echo "Synchronize rpms to S3..."
 	$(BIN_S3CMD) \
 		--acl-public \
 		sync \
-			"$(BUILDDIR)/distrepo/$*/repo0/Packages/" \
-			"s3://manifestdb/distrepo/$(DISTREPO_OS)/rpm/"
-	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/pkgrpm.s3sync"
-	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
+			"$(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/" \
+			"s3://manifestdb/rpmrepo/rpm/$(RPMREPO_OS)/"
+	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/rpm.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"

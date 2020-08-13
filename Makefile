@@ -427,7 +427,9 @@ $(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml: \
 			--setopt "skip_if_unavailable=false" \
 			\
 			--download-metadata \
-			--download-path "$(BUILDDIR)/distrepo/$*/"
+			--download-path "$(BUILDDIR)/distrepo/$*/rpm" \
+			--metadata-path "$(BUILDDIR)/distrepo/$*/" \
+			--norepopath
 
 $(BUILDDIR)/distrepo/%/hash: \
 		$(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml \

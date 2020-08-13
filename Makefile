@@ -411,9 +411,11 @@ $(BUILDDIR)/cache/distrepo/empty: | $(BUILDDIR)/cache/distrepo/
 $(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml: \
 		$(BUILDDIR)/cache/distrepo/dnf.conf \
 		| $(BUILDDIR)/cache/distrepo/root/%/ \
-		  $(BUILDDIR)/distrepo/%/
+		  $(BUILDDIR)/distrepo/%/repo0/ \
+		  $(BUILDDIR)/distrepo/%/rpm/
 	$(if $(DISTREPO_METALINK),,$(error DISTREPO_METALINK must be set))
 	$(if $(DISTREPO_MODULEID),,$(error DISTREPO_MODULEID must be set))
+	$(BIN_LN) -fs "../rpm" "$(BUILDDIR)/distrepo/$*/repo0/Packages"
 	$(BIN_DNF) \
 		-v \
 		reposync \

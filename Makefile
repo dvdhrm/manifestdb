@@ -402,33 +402,29 @@ DISTREPO_METALINK ?=
 DISTREPO_MODULEID ?=
 DISTREPO_OS ?=
 
-$(BUILDDIR)/cache/distrepo/dnf.conf: | $(BUILDDIR)/cache/distrepo/
-	echo "[main]" >"$@"
-
 $(BUILDDIR)/cache/distrepo/empty: | $(BUILDDIR)/cache/distrepo/
 	$(BIN_TOUCH) "$@"
 
 $(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml: \
-		$(BUILDDIR)/cache/distrepo/dnf.conf \
 		| $(BUILDDIR)/cache/distrepo/root/%/ \
 		  $(BUILDDIR)/distrepo/%/repo0/ \
 		  $(BUILDDIR)/distrepo/%/rpm/
 	$(if $(DISTREPO_METALINK),,$(error DISTREPO_METALINK must be set))
 	$(if $(DISTREPO_MODULEID),,$(error DISTREPO_MODULEID must be set))
 	$(BIN_LN) -fs "../rpm" "$(BUILDDIR)/distrepo/$*/repo0/Packages"
+	echo "[main]"                                    >"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
+	echo "module_platform_id=$(DISTREPO_MODULEID)"  >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
+	echo "[repo0]"                                  >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
+	echo "name=repo0"                               >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
+	echo "metalink=$(DISTREPO_METALINK)"            >>"$(BUILDDIR)/cache/distrepo/dnf.$*.conf"
 	$(BIN_DNF) \
 		-v \
 		reposync \
-			--config "$(BUILDDIR)/cache/distrepo/dnf.conf" \
+			--config "$(BUILDDIR)/cache/distrepo/dnf.$*.conf" \
 			--installroot "$(abspath $(BUILDDIR))/cache/distrepo/root/$*" \
 			--setopt "fastestmirror=true" \
-			--setopt "module_platform_id=$(DISTREPO_MODULEID)" \
 			--setopt "reposdir=" \
 			--setopt "skip_if_unavailable=false" \
-			\
-			--repofrompath "repo0,/dev/null" \
-			--repoid repo0 \
-			--setopt "repo0.metalink=$(DISTREPO_METALINK)" \
 			\
 			--download-metadata \
 			--download-path "$(BUILDDIR)/distrepo/$*/"

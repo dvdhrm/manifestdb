@@ -446,8 +446,8 @@ $(BUILDDIR)/distrepo/%/metadata.s3sync: \
 		--acl-public \
 		--follow-symlinks \
 		sync \
-			"$(BUILDDIR)/distrepo/$*/repo/" \
-			"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/"
+			"$(BUILDDIR)/distrepo/$*/repo0/repodata/" \
+			"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/repodata/"
 	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/metadata.s3sync"
 	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
 
@@ -461,7 +461,7 @@ $(BUILDDIR)/distrepo/%/pkglink.s3sync: \
 			-type f \
 			-printf "%P\0" \
 		| $(BIN_XARGS) \
-			"-I{}"
+			"-I{}" \
 			--null \
 			$(BIN_S3CMD) \
 				--acl-public \

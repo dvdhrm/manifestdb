@@ -2,22 +2,33 @@
 # Repository Maintenance
 #
 
-SHELL = /bin/bash
+SHELL = /bin/bash -o pipefail
 
 BUILDDIR ?= .
 SRCDIR ?= .
 
+BIN_CAT ?= cat
 BIN_CP ?= cp
 BIN_CURL ?= curl
+BIN_CUT ?= cut
+BIN_DNF ?= dnf
 BIN_DOCKER ?= docker
 BIN_FIND ?= find
 BIN_GIT ?= git
 BIN_JQ ?= jq
+BIN_LN ?= ln
 BIN_LS ?= ls
 BIN_MKDIR ?= mkdir
+BIN_MV ?= mv
 BIN_OSBUILD ?= osbuild
 BIN_PYTHON3 ?= python3
+BIN_RM ?= rm
+BIN_S3CMD ?= s3cmd
+BIN_SHA256SUM ?= sha256sum
 BIN_TAR ?= tar
+BIN_TEST ?= test
+BIN_TOUCH ?= touch
+BIN_XARGS ?= xargs
 
 MAKE_SILENT = $(MAKE) --no-print-directory --silent
 
@@ -62,6 +73,10 @@ MSRC_TRIPLE = $(MSRC_REGISTRY)/$(MSRC_REPOSITORY)/$(MSRC_IMAGE)
 #         possible commands, so some targets may need to be run from the source
 #         directory.
 #
+#     .SECONDARY:
+#         An empty SECONDARY target signals gnu-make to keep every intermediate
+#         files around, even on failure.
+#
 
 .PHONY: help
 help:
@@ -78,6 +93,7 @@ $(BUILDDIR)/:
 $(BUILDDIR)/%/:
 	$(BIN_MKDIR) -p "$@"
 
+.PHONY: FORCE
 FORCE:
 
 .PHONY: in-srcdir
@@ -86,6 +102,8 @@ in-srcdir:
 		$(subst $(abspath $(CURDIR)),,$(abspath $(SRCDIR))), \
 		$(error Changes to SRCDIR not supported by this target) \
 	)
+
+.SECONDARY:
 
 #
 # Manifest Enumeration
@@ -373,3 +391,95 @@ $(MTEST_MSRC): mtest-msrc-%: FORCE | $(BUILDDIR)/mtest/%/store/
 mtest-build:
 	$(if $(MANIFEST),,$(error MANIFEST must be set))
 	$(MAKE) mtest-build-$(MANIFEST)
+
+#
+# Distrepo Management
+#
+# WIP
+#
+
+DISTREPO_METALINK ?=
+DISTREPO_MODULEID ?=
+DISTREPO_OS ?=
+
+$(BUILDDIR)/cache/distrepo/dnf.conf: | $(BUILDDIR)/cache/distrepo/
+	echo "[main]" >"$@"
+
+$(BUILDDIR)/cache/distrepo/empty: | $(BUILDDIR)/cache/distrepo/
+	$(BIN_TOUCH) "$@"
+
+$(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml: \
+		$(BUILDDIR)/cache/distrepo/dnf.conf \
+		| $(BUILDDIR)/cache/distrepo/root/%/ \
+		  $(BUILDDIR)/distrepo/%/
+	$(if $(DISTREPO_METALINK),,$(error DISTREPO_METALINK must be set))
+	$(if $(DISTREPO_MODULEID),,$(error DISTREPO_MODULEID must be set))
+	$(BIN_DNF) \
+		-v \
+		reposync \
+			--config "$(BUILDDIR)/cache/distrepo/dnf.conf" \
+			--installroot "$(abspath $(BUILDDIR))/cache/distrepo/root/$*" \
+			--setopt "fastestmirror=true" \
+			--setopt "module_platform_id=$(DISTREPO_MODULEID)" \
+			--setopt "reposdir=" \
+			--setopt "skip_if_unavailable=false" \
+			\
+			--repofrompath "repo0,/dev/null" \
+			--repoid repo0 \
+			--setopt "repo0.metalink=$(DISTREPO_METALINK)" \
+			\
+			--download-metadata \
+			--download-path "$(BUILDDIR)/distrepo/$*/"
+
+$(BUILDDIR)/distrepo/%/hash: \
+		$(BUILDDIR)/distrepo/%/repo0/repodata/repomd.xml \
+		| $(BUILDDIR)/distrepo/%/repo/
+	$(BIN_SHA256SUM) <"$<" | $(BIN_CUT) -d " " -f 1 >"$(@)v"
+	$(BIN_LN) -fs "../repo0" "$(BUILDDIR)/distrepo/$*/repo/$*-$$(cat "$(@)v")"
+	$(BIN_MV) "$(@)v" "$@"
+
+$(BUILDDIR)/distrepo/%/metadata.s3sync: \
+		$(BUILDDIR)/distrepo/%/hash
+	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
+	echo "Synchronize metadata to S3..."
+	$(BIN_S3CMD) \
+		--acl-public \
+		--follow-symlinks \
+		sync \
+			"$(BUILDDIR)/distrepo/$*/repo/" \
+			"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/"
+	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/metadata.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
+
+$(BUILDDIR)/distrepo/%/pkglink.s3sync: \
+		$(BUILDDIR)/cache/distrepo/empty \
+		$(BUILDDIR)/distrepo/%/hash
+	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
+	echo "Synchronize package-links to S3..."
+	$(BIN_FIND) \
+			"$(BUILDDIR)/distrepo/$*/repo0/Packages" \
+			-type f \
+			-printf "%P\0" \
+		| $(BIN_XARGS) \
+			"-I{}"
+			--null \
+			$(BIN_S3CMD) \
+				--acl-public \
+				--add-header="x-amz-website-redirect-location:/distrepo/$(DISTREPO_OS)/rpm/{}" \
+				put \
+					"$(BUILDDIR)/cache/distrepo/empty" \
+					"s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/Packages/{}"
+	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/pkglink.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"
+
+$(BUILDDIR)/distrepo/%/pkgrpm.s3sync: \
+		$(BUILDDIR)/distrepo/%/hash
+	$(if $(DISTREPO_OS),,$(error DISTREPO_OS must be set))
+	echo "Synchronize package-rpms to S3..."
+	$(BIN_S3CMD) \
+		--acl-public \
+		sync \
+			"$(BUILDDIR)/distrepo/$*/repo0/Packages/" \
+			"s3://manifestdb/distrepo/$(DISTREPO_OS)/rpm/"
+	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/distrepo/$(DISTREPO_OS)/repo/$*-$$(cat '$(BUILDDIR)/distrepo/$*/hash')/pkgrpm.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/distrepo/$*/hash" >"$@"

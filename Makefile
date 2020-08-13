@@ -408,7 +408,7 @@ $(BUILDDIR)/cache/rpmrepo/empty: | $(BUILDDIR)/cache/rpmrepo/
 $(BUILDDIR)/rpmrepo/repo/%/hash: \
 		| $(BUILDDIR)/cache/rpmrepo/root/%/ \
 		  $(BUILDDIR)/rpmrepo/repo/%/repo0/ \
-		  $(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/ \
+		  $(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/
 	$(if $(RPMREPO_METALINK),,$(error RPMREPO_METALINK must be set))
 	$(if $(RPMREPO_MODULEID),,$(error RPMREPO_MODULEID must be set))
 	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
@@ -431,7 +431,7 @@ $(BUILDDIR)/rpmrepo/repo/%/hash: \
 			--download-path "$(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/" \
 			--metadata-path "$(BUILDDIR)/rpmrepo/repo/$*/" \
 			--norepopath
-	$(BIN_SHA256SUM) <"$(BUILDDIR)/rpmrepo/repo/%/repo0/repodata/repomd.xml" \
+	$(BIN_SHA256SUM) <"$(BUILDDIR)/rpmrepo/repo/$*/repo0/repodata/repomd.xml" \
 		| $(BIN_CUT) -d " " -f 1 >"$(@)"
 
 $(BUILDDIR)/rpmrepo/repo/%/metadata.s3sync: \

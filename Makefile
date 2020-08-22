@@ -25,6 +25,7 @@ BIN_PYTHON3 ?= python3
 BIN_RM ?= rm
 BIN_S3CMD ?= s3cmd
 BIN_SHA256SUM ?= sha256sum
+BIN_SWIFT ?= swift
 BIN_TAR ?= tar
 BIN_TEST ?= test
 BIN_TOUCH ?= touch
@@ -398,6 +399,7 @@ mtest-build:
 # WIP
 #
 
+RPMREPO_BASEURL ?=
 RPMREPO_METALINK ?=
 RPMREPO_MODULEID ?=
 RPMREPO_OS ?=
@@ -409,15 +411,20 @@ $(BUILDDIR)/rpmrepo/repo/%/hash: \
 		| $(BUILDDIR)/cache/rpmrepo/root/%/ \
 		  $(BUILDDIR)/rpmrepo/repo/%/repo0/ \
 		  $(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/
-	$(if $(RPMREPO_METALINK),,$(error RPMREPO_METALINK must be set))
+	$(if $(RPMREPO_BASEURL)$(RPMREPO_METALINK),,$(error RPMREPO_BASEURL or RPMREPO_METALINK must be set))
 	$(if $(RPMREPO_MODULEID),,$(error RPMREPO_MODULEID must be set))
 	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
-	$(BIN_LN) -fs "../../../rpm/$(RPMREPO_OS)" "$(BUILDDIR)/rpmrepo/repo/$*/repo0/Packages"
+	$(BIN_LN) -fs "../../../rpm/$(RPMREPO_OS)/Packages" "$(BUILDDIR)/rpmrepo/repo/$*/repo0/Packages"
 	echo "[main]"                                            >"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
 	echo "module_platform_id=platform:$(RPMREPO_MODULEID)"  >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
 	echo "[repo0]"                                          >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
 	echo "name=repo0"                                       >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
-	echo "metalink=$(RPMREPO_METALINK)"                     >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf"
+	if test ! -z "$(RPMREPO_BASEURL)" ; then \
+		echo "baseurl=$(RPMREPO_BASEURL)"               >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf" ; \
+	fi
+	if test ! -z "$(RPMREPO_METALINK)" ; then \
+		echo "metalink=$(RPMREPO_METALINK)"             >>"$(BUILDDIR)/cache/rpmrepo/dnf.$*.conf" ; \
+	fi
 	$(BIN_DNF) \
 		-v \
 		reposync \
@@ -446,6 +453,16 @@ $(BUILDDIR)/rpmrepo/repo/%/metadata.s3sync: \
 	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/metadata.s3sync"
 	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"
 
+$(BUILDDIR)/rpmrepo/repo/%/metadata.psisync: \
+		$(BUILDDIR)/rpmrepo/repo/%/hash
+	echo "Synchronize metadata to Red Hat PSI OpenStack..."
+	$(BIN_SWIFT) \
+		upload \
+			"manifestdb" \
+			"$(BUILDDIR)/rpmrepo/repo/$*/repo0/repodata" \
+			--object-name "rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/repodata"
+	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"
+
 $(BUILDDIR)/rpmrepo/repo/%/rpm.s3sync: \
 		$(BUILDDIR)/rpmrepo/repo/%/hash
 	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
@@ -456,4 +473,15 @@ $(BUILDDIR)/rpmrepo/repo/%/rpm.s3sync: \
 			"$(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)/" \
 			"s3://manifestdb/rpmrepo/rpm/$(RPMREPO_OS)/"
 	$(BIN_S3CMD) --acl-public put "$<" "s3://manifestdb/rpmrepo/repo/$*-$$(cat '$(BUILDDIR)/rpmrepo/repo/$*/hash')/rpm.s3sync"
+	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"
+
+$(BUILDDIR)/rpmrepo/repo/%/rpm.psisync: \
+		$(BUILDDIR)/rpmrepo/repo/%/hash
+	$(if $(RPMREPO_OS),,$(error RPMREPO_OS must be set))
+	echo "Synchronize metadata to Red Hat PSI OpenStack..."
+	$(BIN_SWIFT) \
+		upload \
+			"manifestdb" \
+			"$(BUILDDIR)/rpmrepo/rpm/$(RPMREPO_OS)" \
+			--object-name "rpmrepo/rpm/$(RPMREPO_OS)"
 	$(BIN_CAT) <"$(BUILDDIR)/rpmrepo/repo/$*/hash" >"$@"

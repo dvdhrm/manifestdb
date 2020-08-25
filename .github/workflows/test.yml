@@ -1,0 +1,11 @@
+name: "Test PR"
+
+on: [pull_request_target, push]
+
+jobs:
+  test:
+    name: "Test"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Test Step"
+      run: echo Test Run
